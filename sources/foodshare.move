@@ -1,4 +1,4 @@
-module food_share::food_share {
+module food_share {
 
     use sui::transfer;
     use sui::clock::{Self, Clock};
@@ -6,18 +6,16 @@ module food_share::food_share {
     use sui::tx_context::{Self, TxContext};
     use sui::table::{Self, Table};
     use std::option::{Option, none, some, is_some, contains, borrow};
-    
+
+    // Error codes
     const EInvalidPost: u64 = 1;
-    // const EInvalidClaim: u64 = 2;
     const ENotDonor: u64 = 4;
     const ENotDriver: u64 = 5;
     const ENotReceiver: u64 = 6;
-    const ERROR_INVALID_CAP :u64 = 7;
+    const ERROR_INVALID_CAP: u64 = 7;
     const EInvalidAssignment: u64 = 8;
-    // const EAlreadyPaid: u64 = 9;
-    // const ERROR_INSUFFCIENT_FUNDS: u64 = 10;
-    
-    
+
+    // Struct representing a surplus post
     struct SurplusPost has key, store {
         id: UID,
         donor: address,
@@ -34,14 +32,15 @@ module food_share::food_share {
         paid: bool,
     }
 
+    // Struct representing a donor profile
     struct DonorProfile has key, store {
         id: UID,
         donor: address,
         donorName: vector<u8>,
         donorType: vector<u8>,
     }
-    
-    // ReceiverProfile Struct 
+
+    // Struct representing a receiver profile
     struct ReceiverProfile has key, store {
         id: UID,
         receiver: address,
@@ -50,13 +49,8 @@ module food_share::food_share {
         capacity: u64,
         receivingTimes: vector<u8>,
     }
-    
-    // ReceiverProfile Cap
-    struct ReceiverCap has key {
-        id: UID,
-        receiverId: ID
-    }
-    
+
+    // Struct representing a driver profile
     struct DriverProfile has key, store {
         id: UID,
         driver: address,
@@ -64,7 +58,8 @@ module food_share::food_share {
         vehicleType: vector<u8>,
         driverRating: u64,
     }
-    
+
+    // Struct representing a record of surplus deliveries
     struct SurplusRecord has key, store {
         id: UID,
         donor: address,
@@ -72,6 +67,7 @@ module food_share::food_share {
         proof_of_delivery: vector<u8>,
     }
 
+    // Struct representing an assignment of surplus delivery
     struct Assignment has key, store {
         id: UID,
         post: SurplusPost,
@@ -81,15 +77,21 @@ module food_share::food_share {
         pickupLocation: vector<u8>,
         deliveryLocation: vector<u8>,
     }
-    
+
+    // Struct representing a record of completed surplus deliveries
     struct SurplusRecords has key, store {
         id: UID,
-        // donor: address,
         completedDeliveries: Table<ID, SurplusRecord>,
     }
 
-     // Function to create a new Donor profile
-    public entry fun create_donor_profile(
+    // Struct representing the capability of a receiver
+    struct ReceiverCap has key {
+        id: UID,
+        receiverId: ID
+    }
+
+    // Function to create a new donor profile
+    public fun create_donor_profile(
         donor: address, donorName: vector<u8>, donorType: vector<u8>, ctx: &mut TxContext
     ) {
         let donor_id = object::new(ctx);
@@ -100,9 +102,9 @@ module food_share::food_share {
             donorType: donorType,
         });
     }
-    
-    // Function to create a new Receiver profile
-    public entry fun create_receiver_profile(
+
+    // Function to create a new receiver profile
+    public fun create_receiver_profile(
         receiver: address, receiverName: vector<u8>, needs: vector<u8>, capacity: u64, 
         receivingTimes: vector<u8>, ctx: &mut TxContext
     ) {
@@ -116,10 +118,9 @@ module food_share::food_share {
             receivingTimes: receivingTimes,
         });
     }
-    
 
     // Function to create a new driver profile
-    public entry fun create_driver_profile(
+    public fun create_driver_profile(
         driver: address, driverName: vector<u8>, vehicleType: vector<u8>,
         ctx: &mut TxContext
     ) {
@@ -132,9 +133,9 @@ module food_share::food_share {
             driverRating: 0,
         });
     }
-    
+
     // Function to create a new surplus post
-    public entry fun create_surplus_post(
+    public fun create_surplus_post(
         donor: address, donorName: vector<u8>, foodType: vector<u8>, 
         quantity: u64, bestBefore: u64, handlingInstructions: vector<u8>,
         clock: &Clock, ctx: &mut TxContext
@@ -156,18 +157,19 @@ module food_share::food_share {
             paid: false,
         });
     }
-    
-    // After the Donor posts a surplus, the receiver can claim the surplus
-    public entry fun claim_surplus_post(post: &mut SurplusPost, receiver: address, ctx: &mut TxContext) {
+
+    // Function for a receiver to claim a surplus post
+    public fun claim_surplus_post(post: &mut SurplusPost, receiver: address, ctx: &mut TxContext) {
         assert!(tx_context::sender(ctx) == receiver, ENotReceiver);
-         assert!(post.receiver == none(), EInvalidPost);
+        assert!(post.receiver == none(), EInvalidPost);
         post.receiver = some(receiver);
     }
 
-    // After the receiver claims the surplus, he can create an assignment for the driver
-    public entry fun create_assignment(
+    // Function for a receiver to create an assignment for a driver after claiming a surplus post
+    public fun create_assignment(
         cap: &ReceiverCap,
-        post: SurplusPost, driver: DriverProfile, receiver: ReceiverProfile, 
+        post: SurplusPost, driver: Driver
+        Profile, receiver: ReceiverProfile, 
         wages: u64, pickupLocation: vector<u8>, deliveryLocation: vector<u8>, ctx: &mut TxContext
     ) {
         assert!(cap.receiverId == object::id(&post), ERROR_INVALID_CAP);
@@ -184,71 +186,68 @@ module food_share::food_share {
             deliveryLocation: deliveryLocation,
         });
     }
-    
-    
-    // After the receiver creates an assignment, the driver can accept the delivery
-    public entry fun accept_delivery(post: &mut SurplusPost, driver: address) {
+
+    // Function for a driver to accept a delivery after being assigned
+    public fun accept_delivery(post: &mut SurplusPost, driver: address) {
         assert!(is_some(&post.receiver), EInvalidAssignment);
         post.driver = some(driver);
-
         post.delivered = true;
     }
     
-    // After the driver accepts the delivery, and completes the delivery, the driver can mark the delivery as delivered
-    public entry fun mark_as_delivered(
+    // Function for a driver to mark a delivery as completed
+    public fun mark_as_delivered(
         post: &mut SurplusPost, records: &mut SurplusRecords, proof: vector<u8>, ctx: &mut TxContext
     ) {
         assert!(contains(&post.driver, &tx_context::sender(ctx)), ENotDriver);
-        // post.status = b"delivered".to_vec();
-        
+        // Ensure receiver is assigned
+        let receiver = match &post.receiver {
+            Some(receiver) => *receiver,
+            None => abort!(EInvalidAssignment),
+        };
+        // Record delivery
         let surplusRecord = SurplusRecord {
             id: object::new(ctx),
             donor: post.donor,
-            receiver: *borrow(&post.receiver),
+            receiver: receiver,
             proof_of_delivery: proof,
         };
         table::add<ID, SurplusRecord>(&mut records.completedDeliveries, object::uid_to_inner(&post.id), surplusRecord);
     }
 
-    // After the driver has delivered the surplus, the receiver can report issues incase there is an issue with the delivery
-    public entry fun report_issues(post: &mut SurplusPost, ctx: &mut TxContext) {
+    // Function for a receiver to report issues with a delivery
+    public fun report_issues(post: &mut SurplusPost, ctx: &mut TxContext) {
         assert!(contains(&post.receiver, &tx_context::sender(ctx)), ENotReceiver);
-
         post.dispute = true;
     }
-    
 
-    // The Donor resolves any issues reported with the surplus post.
-    public entry fun resolve_issues(post: &mut SurplusPost, ctx: &mut TxContext) {
+    // Function for the donor to resolve issues reported by the receiver
+    public fun resolve_issues(post: &mut SurplusPost, ctx: &mut TxContext) {
         assert!(tx_context::sender(ctx) == post.donor, ENotDonor);
         assert!(is_some(&post.receiver), EInvalidPost);
-
         post.dispute = false;
     }
-    
 
-    // The Donor can extend the best before date of the surplus post
-    public entry fun extend_best_before(post: &mut SurplusPost, new_best_before: u64, ctx: &mut TxContext) {
+    // Function for the donor to extend the best before date of the surplus post
+    public fun extend_best_before(post: &mut SurplusPost, new_best_before: u64, ctx: &mut TxContext) {
         assert!(tx_context::sender(ctx) == post.donor, ENotDonor);
         post.bestBefore = new_best_before;
     }
-    
 
-    // The Donor can update the quantity of the surplus post
-    public entry fun update_quantity(post: &mut SurplusPost, new_quantity: u64, ctx: &mut TxContext) {
+    // Function for the donor to update the quantity of the surplus post
+    public fun update_quantity(post: &mut SurplusPost, new_quantity: u64, ctx: &mut TxContext) {
         assert!(tx_context::sender(ctx) == post.donor, ENotDonor);
+        // Check if new quantity is valid
+        assert!(new_quantity >= 0, "New quantity must be non-negative");
         post.quantity = new_quantity;
     }
-    
 
-    // The Receiver can rate the Driver
-    public entry fun rate_driver(
+    // Function for the receiver to rate the driver
+    public fun rate_driver(
         driver: &mut DriverProfile, rating: u64, receiver: address, ctx: &mut TxContext
     ) {
-    // Ensure the function is called by the receiver
-    assert!(tx_context::sender(ctx) == receiver, ENotReceiver);
-    
-    // Update the driver's rating
-    driver.driverRating = driver.driverRating + rating;
+        // Ensure the function is called by the receiver
+        assert!(tx_context::sender(ctx) == receiver, ENotReceiver);
+        // Update the driver's rating
+        driver.driverRating = driver.driverRating + rating;
     }
 }
